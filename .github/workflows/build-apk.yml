@@ -15,26 +15,44 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract ZIP
+      - name: Find and extract Flutter ZIP
+        shell: bash
         run: |
-          set -e
-          echo "Checking ZIP file..."
-          ls -lah
-          test -f "zip 1.zip"
-          mkdir -p flutter_project
-          unzip -o "zip 1.zip" -d flutter_project
-          echo "ZIP extracted successfully"
-          find flutter_project -name pubspec.yaml
+          set -euo pipefail
 
-      - name: Find Flutter project
-        run: |
-          set -e
-          FILE=$(find flutter_project -name pubspec.yaml | head -n 1)
-          if [ -z "$FILE" ]; then
-            echo "ERROR: pubspec.yaml not found"
+          echo "Searching for Flutter ZIP..."
+
+          ZIP_FILE=$(find . -maxdepth 1 -type f \
+            -iname 'zip 1*.zip' | sort -V | tail -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Flutter ZIP not found"
+            ls -lah
             exit 1
           fi
-          echo "PROJECT_DIR=$(dirname "$FILE")" >> "$GITHUB_ENV"
+
+          echo "Found: $ZIP_FILE"
+
+          mkdir -p flutter_project
+          unzip -oq "$ZIP_FILE" -d flutter_project
+
+          echo "Searching for pubspec.yaml..."
+
+          PROJECT_FILE=$(find flutter_project \
+            -name pubspec.yaml \
+            -not -path '*/.dart_tool/*' \
+            | head -n 1)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: pubspec.yaml missing from ZIP"
+            find flutter_project -maxdepth 4 -type f
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Flutter project: $PROJECT_DIR"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -47,11 +65,14 @@ jobs:
         with:
           channel: stable
 
-      - name: Build APK
+      - name: Install dependencies
         run: |
-          set -e
           cd "$PROJECT_DIR"
           flutter pub get
+
+      - name: Build Release APK
+        run: |
+          cd "$PROJECT_DIR"
           flutter build apk --release
 
       - name: Upload APK
