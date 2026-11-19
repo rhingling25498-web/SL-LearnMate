@@ -12,37 +12,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract Flutter ZIP if needed
-        shell: bash
+      - name: Extract ZIP
         run: |
-          set -euo pipefail
+          set -e
+          echo "Checking ZIP file..."
+          ls -lah
+          test -f "zip 1.zip"
+          mkdir -p flutter_project
+          unzip -o "zip 1.zip" -d flutter_project
+          echo "ZIP extracted successfully"
+          find flutter_project -name pubspec.yaml
 
-          if ! find . -name pubspec.yaml -not -path './.git/*' | grep -q .; then
-            if [ -f "zip 1.zip" ]; then
-              mkdir -p _flutter_project
-              unzip -o "zip 1.zip" -d _flutter_project
-            else
-              echo "ERROR: pubspec.yaml and zip 1.zip not found"
-              exit 1
-            fi
-          fi
-
-          PROJECT_FILE=$(find . -name pubspec.yaml \
-            -not -path './.git/*' \
-            -not -path '*/.dart_tool/*' \
-            | head -n 1)
-
-          if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: Flutter project not found in ZIP"
+      - name: Find Flutter project
+        run: |
+          set -e
+          FILE=$(find flutter_project -name pubspec.yaml | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
-
-          PROJECT_DIR=$(dirname "$PROJECT_FILE")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Flutter project found: $PROJECT_DIR"
+          echo "PROJECT_DIR=$(dirname "$FILE")" >> "$GITHUB_ENV"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -55,19 +47,16 @@ jobs:
         with:
           channel: stable
 
-      - name: Install dependencies and build APK
-        shell: bash
+      - name: Build APK
         run: |
-          set -euo pipefail
+          set -e
           cd "$PROJECT_DIR"
           flutter pub get
           flutter build apk --release
-          cp build/app/outputs/flutter-apk/app-release.apk \
-            "$GITHUB_WORKSPACE/SL-LearnMate.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SL-LearnMate-APK
-          path: SL-LearnMate.apk
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
