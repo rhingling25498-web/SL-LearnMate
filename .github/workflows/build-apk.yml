@@ -57,7 +57,7 @@ jobs:
         with:
           channel: stable
 
-      - name: Generate Android project files
+      - name: Generate Android project
         shell: bash
         run: |
           set -euo pipefail
@@ -68,13 +68,58 @@ jobs:
             flutter create --platforms=android .
           fi
 
-          if [ ! -f android/app/build.gradle ] && \
-             [ ! -f android/app/build.gradle.kts ]; then
-            echo "ERROR: Android Gradle files were not generated"
-            exit 1
-          fi
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-36"
 
-      - name: Install dependencies
+      - name: Set Android compile SDK to 36
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          candidates = [
+              Path("android/app/build.gradle"),
+              Path("android/app/build.gradle.kts"),
+          ]
+
+          for path in candidates:
+              if not path.exists():
+                  continue
+
+              content = path.read_text()
+
+              content, count1 = re.subn(
+                  r'(?m)^(\s*)compileSdk\s*=.*$',
+                  r'\g<1>compileSdk = 36',
+                  content
+              )
+
+              content, count2 = re.subn(
+                  r'(?m)^(\s*)compileSdkVersion\s+.*$',
+                  r'\g<1>compileSdkVersion 36',
+                  content
+              )
+
+              if count1 + count2 == 0:
+                  raise SystemExit(
+                      f"Could not find compileSdk setting in {path}"
+                  )
+
+              path.write_text(content)
+              print(f"Updated {path} to compile SDK 36")
+              break
+          else:
+              raise SystemExit("Android app Gradle file not found")
+          PY
+
+      - name: Install Flutter dependencies
         run: |
           cd "$PROJECT_DIR"
           flutter pub get
