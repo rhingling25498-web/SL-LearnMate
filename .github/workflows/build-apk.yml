@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract exact Flutter ZIP
+      - name: Extract Flutter ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -23,8 +23,7 @@ jobs:
           ZIP_FILE="./zip 1(2).zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: zip 1(2).zip not found in repository root."
-            echo "Files available:"
+            echo "ERROR: zip 1(2).zip not found."
             ls -lah
             exit 1
           fi
@@ -38,14 +37,14 @@ jobs:
             -print -quit)
 
           if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: pubspec.yaml not found inside ZIP."
+            echo "ERROR: pubspec.yaml not found."
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PROJECT_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Flutter project: $PROJECT_DIR"
+          echo "Project directory: $PROJECT_DIR"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -82,14 +81,14 @@ jobs:
           fi
 
           if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
-            echo "ERROR: Android sdkmanager not found."
+            echo "ERROR: sdkmanager not found."
             exit 1
           fi
 
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
           "$SDKMANAGER" "platforms;android-36"
 
-      - name: Set compile SDK to 36
+      - name: Set app compile SDK to 36
         shell: bash
         run: |
           set -euo pipefail
@@ -99,39 +98,39 @@ jobs:
           from pathlib import Path
           import re
 
-          candidates = [
+          files = [
               Path("android/app/build.gradle"),
               Path("android/app/build.gradle.kts"),
           ]
 
-          for path in candidates:
+          for path in files:
               if not path.exists():
                   continue
 
               content = path.read_text()
 
-              content, count1 = re.subn(
+              content, n1 = re.subn(
                   r'(?m)^(\s*)compileSdk\s*=.*$',
                   r'\g<1>compileSdk = 36',
                   content
               )
 
-              content, count2 = re.subn(
+              content, n2 = re.subn(
                   r'(?m)^(\s*)compileSdkVersion\s+.*$',
                   r'\g<1>compileSdkVersion 36',
                   content
               )
 
-              if count1 + count2 == 0:
+              if n1 + n2 == 0:
                   raise SystemExit(
-                      f"ERROR: compileSdk setting not found in {path}"
+                      f"Could not update compileSdk in {path}"
                   )
 
               path.write_text(content)
-              print(f"Updated {path} to compile SDK 36")
+              print(f"Updated {path} to SDK 36")
               break
           else:
-              raise SystemExit("ERROR: Android app Gradle file not found")
+              raise SystemExit("Android app Gradle file not found")
           PY
 
       - name: Get Flutter dependencies
@@ -140,6 +139,61 @@ jobs:
           set -euo pipefail
           cd "$PROJECT_DIR"
           flutter pub get
+
+      - name: Fix file_picker compile SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          pub_cache = Path.home() / ".pub-cache" / "hosted" / "pub.dev"
+          matches = list(pub_cache.glob("file_picker-*/android/build.gradle"))
+          matches += list(pub_cache.glob("file_picker-*/android/build.gradle.kts"))
+
+          if not matches:
+              raise SystemExit("ERROR: file_picker Gradle file not found.")
+
+          for path in matches:
+              content = path.read_text()
+
+              pattern = re.compile(
+                  r'(?m)^(\s*)(compileSdkVersion|compileSdk)(\s*=\s*|\s+).*$'
+              )
+
+              def update(match):
+                  indent, key, separator = match.groups()
+                  if key == "compileSdkVersion":
+                      return f"{indent}compileSdkVersion 36"
+                  return f"{indent}compileSdk{separator}36"
+
+              updated, count = pattern.subn(update, content)
+
+              if count == 0:
+                  raise SystemExit(
+                      f"ERROR: Could not find compileSdk in {path}"
+                  )
+
+              path.write_text(updated)
+              print(f"Updated file_picker Gradle SDK to 36: {path}")
+          PY
+
+      - name: Verify compile SDK settings
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking file_picker SDK:"
+          grep -nE 'compileSdk(Version)?' \
+            "$HOME"/.pub-cache/hosted/pub.dev/file_picker-*/android/build.gradle* \
+            || true
+
+          echo "Checking app SDK:"
+          grep -nE 'compileSdk(Version)?' \
+            "$PROJECT_DIR"/android/app/build.gradle* \
+            || true
 
       - name: Build Release APK
         shell: bash
