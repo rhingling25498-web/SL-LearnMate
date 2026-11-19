@@ -15,6 +15,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Extract Flutter ZIP if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! find . -name pubspec.yaml -not -path './.git/*' | grep -q .; then
+            if [ -f "zip 1.zip" ]; then
+              mkdir -p _flutter_project
+              unzip -o "zip 1.zip" -d _flutter_project
+            else
+              echo "ERROR: pubspec.yaml and zip 1.zip not found"
+              exit 1
+            fi
+          fi
+
+          PROJECT_FILE=$(find . -name pubspec.yaml \
+            -not -path './.git/*' \
+            -not -path '*/.dart_tool/*' \
+            | head -n 1)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: Flutter project not found in ZIP"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Flutter project found: $PROJECT_DIR"
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -26,14 +55,19 @@ jobs:
         with:
           channel: stable
 
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Install dependencies and build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          flutter pub get
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "$GITHUB_WORKSPACE/SL-LearnMate.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SL-LearnMate-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: SL-LearnMate.apk
+          if-no-files-found: error
