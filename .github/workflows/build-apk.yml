@@ -15,36 +15,37 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find and extract Flutter ZIP
+      - name: Extract exact Flutter ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP_FILE=$(find . -maxdepth 1 -type f \
-            -iname 'zip 1*.zip' | sort -V | tail -n 1)
+          ZIP_FILE="./zip 1(2).zip"
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Flutter ZIP not found"
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: zip 1(2).zip not found in repository root."
+            echo "Files available:"
             ls -lah
             exit 1
           fi
-
-          echo "Using ZIP: $ZIP_FILE"
 
           mkdir -p flutter_project
           unzip -oq "$ZIP_FILE" -d flutter_project
 
           PROJECT_FILE=$(find flutter_project \
             -name pubspec.yaml \
-            -not -path '*/.dart_tool/*' | head -n 1)
+            -not -path '*/.dart_tool/*' \
+            -print -quit)
 
           if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: pubspec.yaml not found"
+            echo "ERROR: pubspec.yaml not found inside ZIP."
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PROJECT_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Flutter project: $PROJECT_DIR"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -57,7 +58,7 @@ jobs:
         with:
           channel: stable
 
-      - name: Generate Android project
+      - name: Generate Android project if missing
         shell: bash
         run: |
           set -euo pipefail
@@ -72,13 +73,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platforms;android-36"
 
-      - name: Set Android compile SDK to 36
+          SDKMANAGER="$(command -v sdkmanager || true)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" \
+              -name sdkmanager -type f -print -quit)
+          fi
+
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "ERROR: Android sdkmanager not found."
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36"
+
+      - name: Set compile SDK to 36
         shell: bash
         run: |
           set -euo pipefail
+          cd "$PROJECT_DIR"
 
           python3 - <<'PY'
           from pathlib import Path
@@ -109,23 +124,27 @@ jobs:
 
               if count1 + count2 == 0:
                   raise SystemExit(
-                      f"Could not find compileSdk setting in {path}"
+                      f"ERROR: compileSdk setting not found in {path}"
                   )
 
               path.write_text(content)
               print(f"Updated {path} to compile SDK 36")
               break
           else:
-              raise SystemExit("Android app Gradle file not found")
+              raise SystemExit("ERROR: Android app Gradle file not found")
           PY
 
-      - name: Install Flutter dependencies
+      - name: Get Flutter dependencies
+        shell: bash
         run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
           flutter pub get
 
       - name: Build Release APK
+        shell: bash
         run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
           flutter build apk --release
 
